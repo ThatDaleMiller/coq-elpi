@@ -107,7 +107,7 @@ val unspecC : ('a,'b,'c) ContextualConversion.t -> ('a unspec,'b,'c) ContextualC
 val unspec2opt : 'a unspec -> 'a option
 val opt2unspec : 'a option -> 'a unspec
 
-val in_elpi_gr : depth:int -> State.t -> Names.GlobRef.t -> term
+val in_elpi_gr : depth:int -> State.t -> Names.GlobRef.t -> Univ.Instance.t -> term
 val in_elpi_sort : Sorts.t -> term
 val in_elpi_flex_sort : term -> term
 val in_elpi_prod : Name.t -> term -> term -> term
@@ -194,6 +194,9 @@ val pop_env : State.t -> State.t
 
 val get_global_env : State.t -> Environ.env
 val get_sigma : State.t -> Evd.evar_map
+
+val interp_ulevel : State.t -> Glob_term.glob_level -> State.t * Univ.Level.t
+val fresh_uinstance_for : State.t -> GlobRef.t -> State.t * (Univ.Instance.t * EConstr.t)
 
 type hyp = { ctx_entry : term; depth : int }
 

@@ -91,7 +91,15 @@ let rec gterm2lp ~depth state x =
     Feedback.msg_debug Pp.(str"gterm2lp: depth=" ++ int depth ++
       str " term=" ++Printer.pr_glob_constr_env (get_global_env state) x);
   match (DAst.get x) (*.CAst.v*) with
-  | GRef(gr,_ul) -> state, in_elpi_gr ~depth state gr
+  | GRef(gr,Some i) ->
+  (* BUG : use an UVar *)
+      let state, i = CList.fold_left_map interp_ulevel state i in
+      let i = Univ.Instance.of_array (Array.of_list i) in
+      state, in_elpi_gr ~depth state gr i
+  | GRef(gr,None) ->
+   (* BUG : use an UVar *)
+     let state, (i,_) = fresh_uinstance_for state gr in
+      state, in_elpi_gr ~depth state gr i
   | GVar(id) ->
       let ctx, _ = Option.default (upcast @@ mk_coq_context state, []) (get_ctx state) in
       if not (Id.Map.mem id ctx.name2db) then

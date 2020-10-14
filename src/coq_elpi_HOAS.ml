@@ -155,6 +155,26 @@ let univin, isuniv, univout, univ_to_be_patched =
   cin, isc, cout, univ
 ;;
 
+let uinstancein, _isuinstance, _uinstanceout, uinstance =
+  let { CD.cin; isc; cout }, uinstance = CD.declare {
+    CD.name = "uinstance";
+    doc = "Univ.Instance.t";
+    pp = (fun fmt x ->
+      let s = Pp.string_of_ppcmds (Univ.Instance.pr Univ.Level.pr x) in
+      let l = string_split_on_char '.' s in
+      let s = match List.rev l with
+        | x :: y :: _ -> y ^ "." ^ x
+        | _ -> s in
+      Format.fprintf fmt "«%s»" s);
+    compare = (fun x y ->
+      CArray.compare Univ.Level.compare (Univ.Instance.to_array x) (Univ.Instance.to_array y));
+    hash = Univ.Instance.hash;
+    hconsed = false;
+    constants = [];
+  } in
+  cin, isc, cout, uinstance
+;;
+
 type 'a unspec = Given of 'a | Unspec
 let unspec2opt = function Given x -> Some x | Unspec -> None
 let opt2unspec = function Some x -> Given x | None -> Unspec
@@ -195,7 +215,7 @@ let global_constant_of_globref = function
   | GlobRef.ConstRef x -> Constant x
   | x -> CErrors.anomaly Pp.(str"not a global constant: " ++ (Printer.pr_global x))
 
-let constant, inductive, constructor = 
+let constant, inductive, constructor =
   let open API.OpaqueData in
   declare {
     name = "constant";
@@ -275,10 +295,11 @@ module GRSet = U.Set.Make(GROrd)
 
 let globalc  = E.Constants.declare_global_symbol "global"
 
-let in_elpi_gr ~depth s r =
-  let s, t, gl = gref.API.Conversion.embed ~depth s r in
-  assert (gl = []);
-  E.mkApp globalc t []
+let in_elpi_gr ~depth s (r : GlobRef.t) (i : Univ.Instance.t) =
+  let s, t, gl1 = gref.API.Conversion.embed ~depth s r in
+  let s, i, gl2 = uinstance.API.Conversion.embed ~depth s i in
+  assert (gl1 = [] && gl2 = []);
+  E.mkApp globalc t [i]
 
 let in_coq_gref ~depth s t =
   let s, t, gls = gref.API.Conversion.readback ~depth s t in
@@ -561,16 +582,40 @@ let in_elpi_sort s =
 
 let in_elpi_flex_sort t = E.mkApp sortc (E.mkApp typc t []) []
 
+let fresh_uinstance_for state gr =
+  S.update_return engine state (fun ({ sigma; global_env } as s) ->
+    let sigma, t =
+      Evd.with_context_set Evd.univ_flexible sigma
+        (UnivGen.fresh_global_instance global_env gr) in
+    let _, i = C.destRef t in
+    { s with sigma }, (i, EConstr.of_constr t))
+
+let in_coq_gref_uinstance ~depth state gr i =
+  match E.look ~depth i with
+  | E.UnifVar (b,args) ->
+      let state, (i,t) = fresh_uinstance_for state gr in
+      let gl = [ E.mkApp E.Constants.eqc (E.mkUnifVar b ~args state) [E.mkCData (uinstancein i)]] in
+      state, t, gl
+  | _ ->
+      let state, i, gl = uinstance.API.Conversion.readback ~depth state i in
+      let i = Evd.normalize_universe_instance (S.get engine state).sigma i in
+      state, EC.mkRef (gr,EC.EInstance.make i), gl
+
 (* ********************************* }}} ********************************** *)
 
 (* {{{ HOAS : EConstr.t -> elpi ******************************************* *)
 
-let check_univ_inst univ_inst =
-  if not (Univ.Instance.is_empty univ_inst) then
-    nYI "HOAS universe polymorphism"
-    
 let get_sigma s = (S.get engine s).sigma
 let get_global_env s = (S.get engine s).global_env
+
+let interp_ulevel state = function
+  | Glob_term.UNamed l ->
+      let sigma = get_sigma state in
+      state, Pretyping.interp_known_glob_level sigma l
+  | Glob_term.UAnonymous { rigid } ->
+      S.update_return engine state (fun ({ sigma } as s) ->
+        let sigma, l = Evd.new_univ_level_variable (if rigid then Evd.univ_rigid else Evd.univ_flexible) sigma in
+        { s with sigma }, l)
 
 let declare_evc = E.Constants.declare_global_symbol "declare-evar"
 
@@ -763,14 +808,14 @@ let rec constr2lp coq_ctx ~calldepth ~depth state t =
           try state, E.mkConst @@ Names.Id.Map.find n coq_ctx.name2db
           with Not_found ->
             assert(List.mem n coq_ctx.section);
-            state, in_elpi_gr ~depth state (G.VarRef n)
+            state, in_elpi_gr ~depth state (G.VarRef n) Univ.Instance.empty
          end
     | C.Meta _ -> nYI "constr2lp: Meta"
     | C.Evar (k,args) ->
         (* the evar is created at the depth the conversion is called, not at
           the depth at which it is found *)
          let state, elpi_uvk, _, gsl_t = in_elpi_evar ~calldepth k state in
-         gls := gsl_t @ !gls;          
+         gls := gsl_t @ !gls;
          let args = CList.firstn (List.length args - coq_ctx.section_len) args in
          let state, args = CList.fold_left_map (aux ~depth) state args in
          state, E.mkUnifVar elpi_uvk ~args:(List.rev args) state
@@ -798,22 +843,18 @@ let rec constr2lp coq_ctx ~calldepth ~depth state t =
          let state, args = CArray.fold_left_map (aux ~depth) state args in
          state, in_elpi_app hd args
     | C.Const(c,i) ->
-         check_univ_inst (EC.EInstance.kind sigma i);
-         let ref = G.ConstRef c in
-         state, in_elpi_gr ~depth state ref
+         state, in_elpi_gr ~depth state (G.ConstRef c) (EC.EInstance.kind sigma i)
     | C.Ind(ind,i) ->
-         check_univ_inst (EC.EInstance.kind sigma i);
-         state, in_elpi_gr ~depth state (G.IndRef ind)
+         state, in_elpi_gr ~depth state (G.IndRef ind) (EC.EInstance.kind sigma i)
     | C.Construct(construct,i) ->
-         check_univ_inst (EC.EInstance.kind sigma i);
-         state, in_elpi_gr ~depth state (G.ConstructRef construct)
+         state, in_elpi_gr ~depth state (G.ConstructRef construct) (EC.EInstance.kind sigma i)
     | C.Case((*{ C.ci_ind; C.ci_npar; C.ci_cstr_ndecls; C.ci_cstr_nargs }*)_,
              rt,t,bs) ->
          let state, t = aux ~depth state t in
          let state, rt = aux ~depth state rt in
          let state, bs = CArray.fold_left_map (aux ~depth) state bs in
          state,
-         in_elpi_match (*ci_ind ci_npar ci_cstr_ndecls ci_cstr_nargs*) t rt 
+         in_elpi_match (*ci_ind ci_npar ci_cstr_ndecls ci_cstr_nargs*) t rt
            (Array.to_list bs)
     | C.Fix(([| rarg |],_),([| name |],[| typ |], [| bo |])) ->
          let state, typ = aux ~depth state typ in
@@ -1108,14 +1149,9 @@ and lp2constr ~calldepth syntactic_constraints coq_ctx ~depth state ?(on_ty=fals
       let state, u, gsl = universe.API.Conversion.readback ~depth state p in
       state, EC.mkSort u, gsl
  (* constants *)
-  | E.App(c,d,[]) when globalc == c ->
+  | E.App(c,d,[i]) when globalc == c ->
      let state, gr = in_coq_gref ~depth state d in
-     begin match gr with
-     | G.VarRef x -> state, EC.mkVar x, []
-     | G.ConstRef x -> state, EC.mkConst x, []
-     | G.ConstructRef x -> state, EC.mkConstruct x, []
-     | G.IndRef x -> state, EC.mkInd x, []
-     end
+     in_coq_gref_uinstance ~depth state gr i
  (* binders *)
   | E.App(c,name,[s;t]) when lamc == c || prodc == c ->
       let name = in_coq_fresh_annot_name ~depth ~coq_ctx depth name in
