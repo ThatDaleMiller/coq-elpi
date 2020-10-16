@@ -15,7 +15,7 @@ Elpi Query lp:{{
 
 Elpi Query lp:{{
   coq.locate "plus" (const GR),
-  coq.env.const GR (some BO) TY,
+  coq.env.const GR _ (some BO) TY,
   coq.typecheck BO TY ok.
 }}.
 
@@ -188,9 +188,9 @@ Elpi Query lp:{{ std.do! [
 
 Elpi Query lp:{{
   coq.locate "plus" (const GR),
-  coq.env.const GR (some BO) TY,
-  coq.locate "nat" GRNat, Nat = global GRNat,
-  coq.locate "S" GRSucc, Succ = global GRSucc,
+  coq.env.const GR _ (some BO) TY,
+  coq.locate "nat" GRNat, Nat = global GRNat _,
+  coq.locate "S" GRSucc, Succ = global GRSucc _,
   TY = (prod _ Nat _\ prod _ Nat _\ Nat),
   BO = (fix _ 0 TY add\
          fun _ Nat n\ fun _ Nat m\
@@ -200,10 +200,10 @@ Elpi Query lp:{{
 }}.
 
 Axiom empty_nat : nat.
-
+Elpi Trace.
 Elpi Query lp:{{
   coq.locate "empty_nat" (const GR),
-  coq.env.const GR none TY.
+  coq.env.const GR mono none TY.
 }}.
 
 Section Test.
@@ -223,12 +223,12 @@ End Test.
 
 Elpi Query lp:{{
   coq.locate "plus" (const GR),
-  coq.env.const GR (some BO) TY,
+  coq.env.const GR mono (some BO) TY,
   coq.gref->id (const GR) S,
   Name is S ^ "_equal",
   coq.env.add-const Name BO TY @opaque! NGR,
   coq.env.const-opaque? NGR,
-  coq.env.const NGR none _, coq.say {coq.gref->id (const NGR)},
+  coq.env.const NGR _ none _, coq.say {coq.gref->id (const NGR)},
   coq.env.const-body NGR (some BO),
   rex_match "add_equal" {coq.gref->id (const NGR)}.
 }}.

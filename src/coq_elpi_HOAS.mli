@@ -84,7 +84,7 @@ val lp2inductive_entry :
   State.t * (Entries.mutual_inductive_entry * record_field_spec list option * DeclareInd.one_inductive_impls list) * Conversion.extra_goals
 
 val inductive_decl2lp :
-  depth:int -> empty coq_context -> constraints -> State.t -> ((Declarations.mutual_inductive_body * Declarations.one_inductive_body) * (Glob_term.binding_kind list * Glob_term.binding_kind list list)) ->
+  depth:int -> empty coq_context -> constraints -> State.t -> (Names.inductive * (Declarations.mutual_inductive_body * Declarations.one_inductive_body) * (Glob_term.binding_kind list * Glob_term.binding_kind list list)) ->
     State.t * term * Conversion.extra_goals
 
 val in_elpi_id : Names.Name.t -> term
@@ -107,7 +107,7 @@ val unspecC : ('a,'b,'c) ContextualConversion.t -> ('a unspec,'b,'c) ContextualC
 val unspec2opt : 'a unspec -> 'a option
 val opt2unspec : 'a option -> 'a unspec
 
-val in_elpi_gr : depth:int -> State.t -> Names.GlobRef.t -> Univ.Instance.t -> term
+val in_elpi_gr : depth:int -> State.t -> Names.GlobRef.t -> instance:term -> term
 val in_elpi_sort : Sorts.t -> term
 val in_elpi_flex_sort : term -> term
 val in_elpi_prod : Name.t -> term -> term -> term
@@ -139,6 +139,7 @@ val universe : Sorts.t Conversion.t
 val global_constant_of_globref : Names.GlobRef.t -> global_constant
 val abbreviation : Globnames.syndef_name Conversion.t
 val implicit_kind : Glob_term.binding_kind Conversion.t
+val uinstance : Univ.Instance.t Conversion.t
 
 module GRMap : Elpi.API.Utils.Map.S with type key = Names.GlobRef.t
 module GRSet : Elpi.API.Utils.Set.S with type elt = Names.GlobRef.t
@@ -174,8 +175,8 @@ val record_field_att : record_field_att Conversion.t
 
 val new_univ : State.t -> State.t * Univ.Universe.t
 val add_constraints : State.t -> UnivProblem.Set.t -> State.t
-val type_of_global : State.t -> Names.GlobRef.t -> State.t * EConstr.types
-val body_of_constant : State.t -> Names.Constant.t -> State.t * EConstr.t option
+val type_of_global : Names.GlobRef.t -> Univ.Instance.t option -> State.t -> State.t * (EConstr.types * Univ.Instance.t)
+val body_of_constant : Names.Constant.t -> Univ.Instance.t option -> State.t -> State.t * (EConstr.t * Univ.Instance.t) option
 
 val command_mode : State.t -> bool
 val grab_global_env : State.t -> State.t

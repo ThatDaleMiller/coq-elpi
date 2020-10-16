@@ -150,6 +150,7 @@ let constr2lp_closed_ground ~depth state t =
 let clauses_for_later =
   State.declare ~name:"coq-elpi:clauses_for_later"
     ~init:(fun () -> [])
+    ~start:(fun x -> x)
     ~pp:(fun fmt l ->
        List.iter (fun (dbname, code,local) ->
          Format.fprintf fmt "db:%s code:%a local:%b\n"
@@ -535,12 +536,26 @@ let if_keep x f =
   | Pred.Discard -> None
   | Pred.Keep -> Some (f ())
 
-let if_keep_acc x state f =
+let if_keep_acc x state f i =
+  match x with
+  | Pred.Discard -> state, None, i
+  | Pred.Keep ->
+      let state, (x, i) = f i state in
+      state, Some x, Some i
+
+let optD i (s, x) =
+  match x with
+  | None -> s, None, i
+  | Some(x,i) -> s, Some x, Some i
+
+let if_keep_acc_opt x state f i =
   match x with
   | Pred.Discard -> state, None
-  | Pred.Keep ->
-       let state, x = f state in
-       state, Some x
+  | Pred.Keep -> f i state
+
+let io2opt = function
+  | Pred.NoData -> None
+  | Pred.Data x -> Some x
 
 let detype env sigma t =
     (* To avoid turning named universes into unnamed ones *)
@@ -746,44 +761,50 @@ It undestands qualified names, e.g. "Nat.t". It's a fatal error if Name cannot b
 
   MLCode(Pred("coq.env.typeof",
     In(gref, "GR",
+    InOut(B.ioarg uinstance, "UI",
     Out(closed_ground_term, "Ty",
-    Full(unit_ctx, "reads the type Ty of a global reference."))),
-  (fun gr _ ~depth _ _ state ->
-    let state, ty = type_of_global state gr in
-    state, !:ty, [])),
+    Full(unit_ctx, "reads the type Ty of a global reference.")))),
+  (fun gr ui _ ~depth _ _ state ->
+    let state, (ty, ui) = type_of_global gr (io2opt ui) state in
+    state, !: ui +! ty, [])),
   DocAbove);
 
   MLCode(Pred("coq.env.indt",
     In(inductive, "reference to the inductive type",
+    InOut(B.ioarg uinstance,"UI",
     Out(bool, "tt if the type is inductive (ff for co-inductive)",
     Out(int,  "number of parameters",
     Out(int,  "number of parameters that are uniform (<= parameters)",
     Out(closed_ground_term, "type of the inductive type constructor including parameters",
     Out(list constructor, "list of constructor names",
     Out(list closed_ground_term, "list of the types of the constructors (type of KNames) including parameters",
-    Full(global, "reads the inductive type declaration for the environment")))))))),
-  (fun i _ _ _ arity knames ktypes ~depth { env } _ state ->
+    Full(global, "reads the inductive type declaration for the environment"))))))))),
+  (fun i ui _ _ _ arity knames ktypes ~depth { env } _ state ->
      let open Declarations in
      let mind, indbo as ind = lookup_inductive env i in
      let co  = mind.mind_finite <> Declarations.CoFinite in
      let lno = mind.mind_nparams in
      let luno = mind.mind_nparams_rec in
+     let state, (ui, _) =
+       match ui with
+       | Pred.Data ui -> state, (ui, EConstr.mkProp)
+       | Pred.NoData -> fresh_uinstance_for state (GlobRef.IndRef i) in
      let arity = if_keep arity (fun () ->
-       Inductive.type_of_inductive (ind,Univ.Instance.empty)
+       Inductive.type_of_inductive (ind,ui)
        |> EConstr.of_constr) in
      let knames = if_keep knames (fun () ->
        CList.(init Declarations.(indbo.mind_nb_constant + indbo.mind_nb_args)
            (fun k -> i,k+1))) in
      let ktypes = if_keep ktypes (fun () ->
-       Inductive.type_of_constructors (i,Univ.Instance.empty) ind
+       Inductive.type_of_constructors (i,ui) ind
        |> CArray.map_to_list EConstr.of_constr) in
-     state, !: co +! lno +! luno +? arity +? knames +? ktypes, [])),
+     state, !: ui +! co +! lno +! luno +? arity +? knames +? ktypes, [])),
   DocNext);
 
   MLCode(Pred("coq.env.indt-decl",
     In(inductive, "reference to the inductive type",
     Out(indt_decl_out,"HOAS description of the inductive type",
-    Full(global,"reads the inductive type declaration for the environment"))),
+    Full(global,"reads the inductive type declaration from the environment"))),
   (fun i _ ~depth { env } _ state  ->
      let mind, indbo = lookup_inductive env i in
      let knames = CList.(init Declarations.(indbo.mind_nb_constant + indbo.mind_nb_args) (fun k -> GlobRef.ConstructRef(i,k+1))) in
@@ -792,27 +813,32 @@ It undestands qualified names, e.g. "Nat.t". It's a fatal error if Name cannot b
      let k_impls = List.map hd k_impls in
      let i_impls = Impargs.extract_impargs_data @@ Impargs.implicits_of_global (GlobRef.IndRef i) in
      let i_impls = hd i_impls in
-     state, !: ((mind,indbo), (i_impls,k_impls)), [])),
+     state, !: (i, (mind,indbo), (i_impls,k_impls)), [])),
   DocNext);
 
   MLCode(Pred("coq.env.indc",
     In(constructor, "GR",
+    InOut(B.ioarg uinstance, "UI",
     Out(int, "ParamNo",
     Out(int, "UnifParamNo",
     Out(int, "Kno",
     Out(closed_ground_term,"Ty",
     Full (global, "reads the type Ty of an inductive constructor GR, as well as "^
           "the number of parameters ParamNo and uniform parameters "^
-          "UnifParamNo and the number of the constructor Kno (0 based)")))))),
-  (fun (i,k as kon) _ _ _ ty ~depth { env } _ state ->
+          "UnifParamNo and the number of the constructor Kno (0 based)"))))))),
+  (fun (i,k as kon) ui _ _ _ ty ~depth { env } _ state ->
     let open Declarations in
     let mind, indbo as ind = Inductive.lookup_mind_specif env i in
     let lno = mind.mind_nparams in
     let luno = mind.mind_nparams_rec in
-    let ty = if_keep ty (fun () ->
-      Inductive.type_of_constructor (kon,Univ.Instance.empty) ind
+    let state, (ui, _) =
+      match ui with
+      | Pred.Data ui -> state, (ui, EConstr.mkProp)
+      | Pred.NoData -> fresh_uinstance_for state (GlobRef.ConstructRef kon) in
+   let ty = if_keep ty (fun () ->
+      Inductive.type_of_constructor (kon,ui) ind
       |> EConstr.of_constr) in
-    state, !: lno +! luno +! (k-1) +? ty, [])),
+    state, !: ui +! lno +! luno +! (k-1) +? ty, [])),
   DocAbove);
 
   MLCode(Pred("coq.env.const-opaque?",
@@ -833,41 +859,44 @@ It undestands qualified names, e.g. "Nat.t". It's a fatal error if Name cannot b
 
   MLCode(Pred("coq.env.const",
     In(constant,  "GR",
+    InOut(B.ioarg uinstance, "UI",
     Out(option closed_ground_term, "Bo",
     Out(closed_ground_term, "Ty",
     Full (global, "reads the type Ty and the body Bo of constant GR. "^
-          "Opaque constants have Bo = none.")))),
-  (fun c bo ty ~depth {env} _ state ->
+          "Opaque constants have Bo = none."))))),
+  (fun c ui bo ty ~depth {env} _ state ->
     match c with
     | Constant c ->
-        let state, ty = if_keep_acc ty state (fun s -> type_of_global s (GlobRef.ConstRef c)) in
-        let state, bo = if_keep_acc bo state (fun state ->
+        let state, ty, ui = if_keep_acc ty state (type_of_global (GlobRef.ConstRef c)) (io2opt ui) in
+        let state, bo, ui = optD ui @@ if_keep_acc_opt bo state (fun ui s ->
           if Declareops.is_opaque (Environ.lookup_constant c env)
-          then state, None
+          then s, None
           else
-            body_of_constant state c) in
-        state, ?: bo +? ty, []
+            body_of_constant c ui s) ui in
+        state, ?: ui +! bo +? ty, []
     | Variable v ->
-        let state, ty = if_keep_acc ty state (fun s -> type_of_global s (GlobRef.VarRef v)) in
+        let state, ty, ui = if_keep_acc ty state (type_of_global (GlobRef.VarRef v)) (io2opt ui) in
         let bo = if_keep bo (fun () ->
           match Environ.lookup_named v env with
           | Context.Named.Declaration.LocalDef(_,bo,_) -> Some (bo |> EConstr.of_constr)
           | Context.Named.Declaration.LocalAssum _ -> None) in
-        state, ?: bo +? ty, [])),
+        state, ?: ui +? bo +? ty, [])),
   DocAbove);
 
   MLCode(Pred("coq.env.const-body",
     In(constant,  "GR",
+    InOut(B.ioarg uinstance, "UI",
     Out(option closed_ground_term, "Bo",
     Full (global, "reads the body of a constant, even if it is opaque. "^
-          "If such body is none, then the constant is a true axiom"))),
-  (fun c _ ~depth {env} _ state ->
+          "If such body is none, then the constant is a true axiom")))),
+  (fun c ui _ ~depth {env} _ state ->
     match c with
     | Constant c ->
-         let state, bo = body_of_constant state c in
-         state, !: bo, []
+         let ui = io2opt ui in
+         let state, bo, ui = optD ui @@ body_of_constant c ui state in
+         state, ?: ui +! bo, []
     | Variable v ->
-         state, !: begin
+         state, !: Univ.Instance.empty +! begin
          match Environ.lookup_named v env with
          | Context.Named.Declaration.LocalDef(_,bo,_) -> Some (bo |> EConstr.of_constr)
          | Context.Named.Declaration.LocalAssum _ -> None
@@ -1195,6 +1224,8 @@ denote the same x as before.|};
   MLData univ;
 
   MLData universe;
+
+  MLData uinstance;
 
   MLCode(Pred("coq.univ.print",
     Read(unit_ctx,  "prints the set of universe constraints"),

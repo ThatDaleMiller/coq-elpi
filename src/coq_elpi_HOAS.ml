@@ -26,8 +26,8 @@ let debug () = !Flags.debug
 (* {{{ CData ************************************************************** *)
 
 (* names *)
-let namein, isname, nameout, name =
-  let { CD.cin; isc; cout }, name  = CD.declare {
+let (*namein, isname, nameout,*) name =
+  let (*{ CD.cin; isc; cout },*) name  = CD.declare {
     CD.name = "name";
     doc = "Name.Name.t: Name hints (in binders), can be input writing a name between backticks, e.g. `x` or `_` for anonymous. Important: these are just printing hints with no meaning, hence in elpi two name are always related: `x` = `y`";
     pp = (fun fmt x ->
@@ -37,7 +37,7 @@ let namein, isname, nameout, name =
     hconsed = false;
     constants = [];
   } in
-  cin, isc, cout, name
+  (*cin, isc, cout,*) name
 ;;
 let in_elpi_name x = E.mkCData (namein x)
 
@@ -157,8 +157,8 @@ let univin, isuniv, univout, univ_to_be_patched =
 
 let uinstancein, _isuinstance, _uinstanceout, uinstance =
   let { CD.cin; isc; cout }, uinstance = CD.declare {
-    CD.name = "uinstance";
-    doc = "Univ.Instance.t";
+    CD.name = "univ-instance";
+    doc = "Universes level instance for a universe-polymoprhic constant, the mono constant is for monomorphic constants";
     pp = (fun fmt x ->
       let s = Pp.string_of_ppcmds (Univ.Instance.pr Univ.Level.pr x) in
       let l = string_split_on_char '.' s in
@@ -170,7 +170,7 @@ let uinstancein, _isuinstance, _uinstanceout, uinstance =
       CArray.compare Univ.Level.compare (Univ.Instance.to_array x) (Univ.Instance.to_array y));
     hash = Univ.Instance.hash;
     hconsed = false;
-    constants = [];
+    constants = ["mono",Univ.Instance.empty];
   } in
   cin, isc, cout, uinstance
 ;;
@@ -295,10 +295,9 @@ module GRSet = U.Set.Make(GROrd)
 
 let globalc  = E.Constants.declare_global_symbol "global"
 
-let in_elpi_gr ~depth s (r : GlobRef.t) (i : Univ.Instance.t) =
-  let s, t, gl1 = gref.API.Conversion.embed ~depth s r in
-  let s, i, gl2 = uinstance.API.Conversion.embed ~depth s i in
-  assert (gl1 = [] && gl2 = []);
+let in_elpi_gr ~depth s (r : GlobRef.t) ~instance:i =
+  let s, t, gl = gref.API.Conversion.embed ~depth s r in
+  assert (gl = []);
   E.mkApp globalc t [i]
 
 let in_coq_gref ~depth s t =
@@ -404,6 +403,7 @@ let command_mode =
   S.declare ~name:"coq-elpi:command-mode"
     ~init:(fun () -> true)
     ~pp:(fun fmt b -> Format.fprintf fmt "%b" b)
+    ~start:(fun x -> x)
 
 module CoqEngine_HOAS : sig 
 
@@ -478,7 +478,7 @@ let hack_UState_demote_global_univs_missin_API_in_811 env (uctx : UState.t) =
 
  let engine : coq_engine S.component =
    S.declare ~name:"coq-elpi:evmap-constraint-type"
-     ~pp:pp_coq_engine ~init
+     ~pp:pp_coq_engine ~init ~start:(fun x -> x)
 
 end
 
@@ -508,7 +508,7 @@ module UM = F.Map(struct
 end)
 
 let um = S.declare ~name:"coq-elpi:evar-univ-map"
-  ~pp:UM.pp ~init:(fun () -> UM.empty)
+  ~pp:UM.pp ~init:(fun () -> UM.empty) ~start:(fun x -> x)
 
 let new_univ state =
   S.update_return engine state (fun ({ sigma } as x) ->
@@ -594,6 +594,9 @@ let in_coq_gref_uinstance ~depth state gr i =
   match E.look ~depth i with
   | E.UnifVar (b,args) ->
       let state, (i,t) = fresh_uinstance_for state gr in
+      if debug () then
+        Feedback.msg_debug
+          Pp.(str"lp2term@in_coq_gref_uinstance " ++ Printer.pr_global gr ++ str " := " ++ Univ.Instance.pr Univ.Level.pr i);
       let gl = [ E.mkApp E.Constants.eqc (E.mkUnifVar b ~args state) [E.mkCData (uinstancein i)]] in
       state, t, gl
   | _ ->
@@ -808,7 +811,8 @@ let rec constr2lp coq_ctx ~calldepth ~depth state t =
           try state, E.mkConst @@ Names.Id.Map.find n coq_ctx.name2db
           with Not_found ->
             assert(List.mem n coq_ctx.section);
-            state, in_elpi_gr ~depth state (G.VarRef n) Univ.Instance.empty
+            let state, i, _ = uinstance.API.Conversion.embed ~depth state Univ.Instance.empty in
+            state, in_elpi_gr ~depth state (G.VarRef n) ~instance:i
          end
     | C.Meta _ -> nYI "constr2lp: Meta"
     | C.Evar (k,args) ->
@@ -843,11 +847,14 @@ let rec constr2lp coq_ctx ~calldepth ~depth state t =
          let state, args = CArray.fold_left_map (aux ~depth) state args in
          state, in_elpi_app hd args
     | C.Const(c,i) ->
-         state, in_elpi_gr ~depth state (G.ConstRef c) (EC.EInstance.kind sigma i)
+         let state, i, _ = uinstance.API.Conversion.embed ~depth state (EC.EInstance.kind sigma i) in
+         state, in_elpi_gr ~depth state (G.ConstRef c) ~instance:i
     | C.Ind(ind,i) ->
-         state, in_elpi_gr ~depth state (G.IndRef ind) (EC.EInstance.kind sigma i)
+         let state, i, _ = uinstance.API.Conversion.embed ~depth state (EC.EInstance.kind sigma i) in
+         state, in_elpi_gr ~depth state (G.IndRef ind) ~instance:i
     | C.Construct(construct,i) ->
-         state, in_elpi_gr ~depth state (G.ConstructRef construct) (EC.EInstance.kind sigma i)
+         let state, i, _ = uinstance.API.Conversion.embed ~depth state (EC.EInstance.kind sigma i) in
+         state, in_elpi_gr ~depth state (G.ConstructRef construct) ~instance:i
     | C.Case((*{ C.ci_ind; C.ci_npar; C.ci_cstr_ndecls; C.ci_cstr_nargs }*)_,
              rt,t,bs) ->
          let state, t = aux ~depth state t in
@@ -956,17 +963,17 @@ let add_constraints state c = S.update engine state (fun ({ sigma } as x) ->
   { x with sigma = Evd.add_universe_constraints sigma c })
 
 
-let type_of_global state r = S.update_return engine state (fun x ->
+let type_of_global r inst state = S.update_return engine state (fun x ->
   let ty, ctx = Typeops.type_of_global_in_context x.global_env r in
-  let inst, ctx = UnivGen.fresh_instance_from ctx None in
+  let inst, ctx = UnivGen.fresh_instance_from ctx inst in
   let ty = Vars.subst_instance_constr inst ty in
   let sigma = Evd.merge_context_set Evd.univ_rigid x.sigma ctx in
-  { x with sigma }, EConstr.of_constr ty)
+  { x with sigma }, (EConstr.of_constr ty, inst))
 
-let body_of_constant state c = S.update_return engine state (fun x ->
+let body_of_constant c inst state = S.update_return engine state (fun x ->
   match Global.body_of_constant_body Library.indirect_accessor (Environ.lookup_constant c x.global_env) with
   | Some (bo, priv, ctx) ->
-     let inst, ctx = UnivGen.fresh_instance_from ctx None in
+     let inst, ctx = UnivGen.fresh_instance_from ctx inst in
      let bo = Vars.subst_instance_constr inst bo in
      let sigma = Evd.merge_context_set Evd.univ_rigid x.sigma ctx in
      let sigma = match priv with
@@ -975,7 +982,7 @@ let body_of_constant state c = S.update_return engine state (fun x ->
       let ctx = Util.on_snd (Univ.subst_univs_level_constraints (Univ.make_instance_subst inst)) ctx in
       Evd.merge_context_set Evd.univ_rigid sigma ctx
      in
-     { x with sigma }, Some (EConstr.of_constr bo)
+     { x with sigma }, Some (EConstr.of_constr bo, inst)
   | None -> x, None)
 
 let evar_arity k state =
@@ -2192,7 +2199,7 @@ let safe_chop n l =
   in
     aux n [] l
 
-let inductive_decl2lp ~depth coq_ctx constraints state ((mind,ind),(i_impls,k_impls)) =
+let inductive_decl2lp ~depth coq_ctx constraints state (i, (mind,ind),(i_impls,k_impls)) =
   let calldepth = depth in
   let allparams = List.map EConstr.of_rel_decl mind.Declarations.mind_params_ctxt in
   let kind = inductive_kind_of_recursivity_kind mind.Declarations.mind_finite in
@@ -2220,9 +2227,9 @@ let inductive_decl2lp ~depth coq_ctx constraints state ((mind,ind),(i_impls,k_im
     let inline, keep = CList.chop (List.length ctx - n) ctx in
     keep, EConstr.it_mkProd_or_LetIn t inline in
   let k_impls = List.map (drop_upto_nparams_from_ctx paramsno) k_impls in
-  let arity =
-     drop_nparams_from_term allparamsno
-       (Inductive.type_of_inductive ((mind,ind),Univ.Instance.empty)) in
+  let state, arity =
+     let state, (ty, _) = type_of_global (GlobRef.IndRef i) None state in
+     state, drop_nparams_from_term allparamsno (EConstr.to_constr (get_sigma state) ty) in
   let knames = CArray.map_to_list (fun x -> Name x) ind.Declarations.mind_consnames in
   let ktys = CArray.map_to_list (fun (ctx,x) ->
     let ctx = drop_nparams_from_ctx paramsno @@ List.map EConstr.of_rel_decl ctx in

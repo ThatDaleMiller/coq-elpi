@@ -31,6 +31,7 @@ let get_ctx, set_ctx, _update_ctx =
     S.declare ~name:"coq-elpi:glob-quotation-bound-vars"
       ~init:(fun () -> None)
       ~pp:(fun fmt -> function Some (x,_) -> () | None -> assert false)
+      ~start:(fun x -> x)
        in
   S.(get bound_vars, set bound_vars, update bound_vars)
 
@@ -84,7 +85,9 @@ let under_ctx name ty bo gterm2lp ~depth state x =
   let state = pop_env state in
   state, y
 
-let type_gen = ref 0
+let type_gen =
+  let i = ref 0 in
+  fun () -> incr i; !i
 
 let rec gterm2lp ~depth state x =
   if debug () then
@@ -92,14 +95,13 @@ let rec gterm2lp ~depth state x =
       str " term=" ++Printer.pr_glob_constr_env (get_global_env state) x);
   match (DAst.get x) (*.CAst.v*) with
   | GRef(gr,Some i) ->
-  (* BUG : use an UVar *)
       let state, i = CList.fold_left_map interp_ulevel state i in
       let i = Univ.Instance.of_array (Array.of_list i) in
-      state, in_elpi_gr ~depth state gr i
+      let state, instance, _ = uinstance.API.Conversion.embed ~depth state i in
+      state, in_elpi_gr ~depth state gr ~instance
   | GRef(gr,None) ->
-   (* BUG : use an UVar *)
-     let state, (i,_) = fresh_uinstance_for state gr in
-      state, in_elpi_gr ~depth state gr i
+      let state, instance = API.RawQuery.mk_Arg state ~name:(Printf.sprintf "type_%d" (type_gen ())) ~args:[] in
+      state, in_elpi_gr ~depth state gr ~instance
   | GVar(id) ->
       let ctx, _ = Option.default (upcast @@ mk_coq_context state, []) (get_ctx state) in
       if not (Id.Map.mem id ctx.name2db) then
@@ -108,8 +110,7 @@ let rec gterm2lp ~depth state x =
             prlist_with_sep spc Id.print (Id.Map.bindings ctx.name2db |> List.map fst));
       state, E.mkConst (Id.Map.find id ctx.name2db)
   | GSort(UAnonymous {rigid=true}) ->
-      incr type_gen;
-      let state, s = API.RawQuery.mk_Arg state ~name:(Printf.sprintf "type_%d" !type_gen) ~args:[] in
+      let state, s = API.RawQuery.mk_Arg state ~name:(Printf.sprintf "type_%d" (type_gen ())) ~args:[] in
       state, in_elpi_flex_sort s
   | GSort(UNamed [name,0]) ->
       let env = get_global_env state in
@@ -217,8 +218,8 @@ let rec gterm2lp ~depth state x =
         (* We try hard to stick in there the inductive type, so that
          * the term can be read back (mkCases needs the ind) *)
         (* TODO: add whd reduction in spine *)
-        let ty =
-          Inductive.type_of_inductive (indspecif,Univ.Instance.empty) in
+        let state, (ty,_) = type_of_global (GlobRef.IndRef ind) None state in
+        let ty = EConstr.to_constr (get_sigma state) ty in
         let safe_tail = function [] -> [] | _ :: x -> x in
         let best_name n l = match n, l with
           | _, (Name x) :: rest -> Name x,DAst.make (GVar x), rest
