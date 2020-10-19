@@ -26,8 +26,8 @@ let debug () = !Flags.debug
 (* {{{ CData ************************************************************** *)
 
 (* names *)
-let (*namein, isname, nameout,*) name =
-  let (*{ CD.cin; isc; cout },*) name  = CD.declare {
+let namein, isname, nameout, name =
+  let { CD.cin; isc; cout }, name  = CD.declare {
     CD.name = "name";
     doc = "Name.Name.t: Name hints (in binders), can be input writing a name between backticks, e.g. `x` or `_` for anonymous. Important: these are just printing hints with no meaning, hence in elpi two name are always related: `x` = `y`";
     pp = (fun fmt x ->
@@ -37,9 +37,9 @@ let (*namein, isname, nameout,*) name =
     hconsed = false;
     constants = [];
   } in
-  (*cin, isc, cout,*) name
+  cin, isc, cout, name
 ;;
-let in_elpi_name x = E.mkCData (namein x)
+let in_elpi_name x = namein x
 
 let is_coq_name ~depth t =
   match E.look ~depth t with
@@ -332,7 +332,7 @@ let mptyin, istymp, mptyout, modtypath =
   cin, isc, cout, x
 ;;
 
-let in_elpi_modpath ~ty mp = E.mkCData (if ty then mptyin mp else mpin mp)
+let in_elpi_modpath ~ty mp = if ty then mptyin mp else mpin mp
 let is_modpath ~depth t =
   match E.look ~depth t with E.CData x -> ismp x | _ -> false
 let is_modtypath ~depth t =
@@ -534,7 +534,7 @@ let univ =
        with Not_found ->
          let state, u = new_univ state in
          let state = S.update um state (UM.add b u) in
-         state, u, [ E.mkApp E.Constants.eqc (E.mkUnifVar b ~args state) [E.mkCData (univin u)]]
+         state, u, [ E.mkApp E.Constants.eqc (E.mkUnifVar b ~args state) [univin u]]
        end
     | _ -> univ_to_be_patched.API.Conversion.readback ~depth state t
   end
@@ -576,8 +576,8 @@ let in_elpi_sort s =
     (match s with
     | Sorts.SProp -> E.mkGlobal spropc
     | Sorts.Prop -> E.mkGlobal propc
-    | Sorts.Set -> E.mkApp typc (E.mkCData (univin Univ.type0_univ)) []
-    | Sorts.Type u -> E.mkApp typc (E.mkCData (univin u)) [])
+    | Sorts.Set -> E.mkApp typc (univin Univ.type0_univ) []
+    | Sorts.Type u -> E.mkApp typc (univin u) [])
     []
 
 let in_elpi_flex_sort t = E.mkApp sortc (E.mkApp typc t []) []
@@ -597,7 +597,7 @@ let in_coq_gref_uinstance ~depth state gr i =
       if debug () then
         Feedback.msg_debug
           Pp.(str"lp2term@in_coq_gref_uinstance " ++ Printer.pr_global gr ++ str " := " ++ Univ.Instance.pr Univ.Level.pr i);
-      let gl = [ E.mkApp E.Constants.eqc (E.mkUnifVar b ~args state) [E.mkCData (uinstancein i)]] in
+      let gl = [ E.mkApp E.Constants.eqc (E.mkUnifVar b ~args state) [uinstancein i]] in
       state, t, gl
   | _ ->
       let state, i, gl = uinstance.API.Conversion.readback ~depth state i in

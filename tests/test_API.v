@@ -214,9 +214,9 @@ Elpi Query lp:{{
   coq.locate "Vector.nil" GR1,
   coq.locate "nat"        GR2,
   coq.locate "A"          GR3,
-  coq.env.typeof GR1 _,
-  coq.env.typeof GR2 _,
-  coq.env.typeof GR3 _.
+  coq.env.typeof GR1 _ _,
+  coq.env.typeof GR2 _ _,
+  coq.env.typeof GR3 _ _.
 }}.
 
 End Test.
@@ -229,7 +229,7 @@ Elpi Query lp:{{
   coq.env.add-const Name BO TY @opaque! NGR,
   coq.env.const-opaque? NGR,
   coq.env.const NGR _ none _, coq.say {coq.gref->id (const NGR)},
-  coq.env.const-body NGR (some BO),
+  coq.env.const-body NGR mono (some BO),
   rex_match "add_equal" {coq.gref->id (const NGR)}.
 }}.
 
@@ -239,10 +239,10 @@ About add_equal.
 
 Elpi Query lp:{{
   coq.locate "False" F,
-  coq.env.add-const "myfalse" _ (global F) _ GR,
+  coq.env.add-const "myfalse" _ (global F _) _ GR,
   coq.env.const-opaque? GR,
-  coq.env.const GR none _,
-  coq.env.const-body GR none,
+  coq.env.const GR mono none _,
+  coq.env.const-body GR mono none,
   coq.say GR.
 }}.
 
@@ -384,9 +384,9 @@ Elpi Query lp:{{
        coq.env.begin-module "B" none,
          coq.env.add-const "y" {{3}} _ _ GRy,
        coq.env.end-module _,
-     coq.env.add-const "z" (global (const GRy)) _ _ _,
+     coq.env.add-const "z" (global (const GRy) _) _ _ _,
      coq.env.add-indt (inductive "i1" _ (arity {{Type}}) i\ []) I,
-     coq.env.add-const "i" (global (indt I)) _ _ _, % silly limitation in Coq
+     coq.env.add-const "i" (global (indt I) _) _ _ _, % silly limitation in Coq
    coq.env.end-module MP,
    coq.env.module MP L
    %coq.env.module-type MP_TA [TAz,TAi] % name is broken wrt =, don't use it!
@@ -432,7 +432,7 @@ Elpi Query lp:{{
   coq.locate "a" (const CA),
   coq.locate "b" (const CB),
   coq.locate "c" (const CC),
-  coq.env.const CC (some (global (const CB))) _,
+  coq.env.const CC _ (some (global (const CB) _)) _,
   @global! => @local! => coq.env.add-const "d" _ {{ nat }} _ _,
   [ @local! , @global! ] => coq.env.add-const "d1" _ {{ nat }} _ _,
   @local! => coq.env.add-const "e" {{ 3 }} {{ nat }} _ _.
@@ -449,7 +449,7 @@ Elpi Query lp:{{
   coq.env.begin-section "Foo",
   @local! => coq.env.add-const "x" _ {{ nat }} _ X,
   coq.env.section [X],
-  coq.env.add-const "fx" (global (const X)) _ _ _,
+  coq.env.add-const "fx" (global (const X) _) _ _ _,
   coq.env.end-section.
 }}.
 
@@ -461,11 +461,11 @@ Check fx : nat -> nat.
 Require Import List.
 
 Elpi Query lp:{{
-  coq.locate "cons" GRCons, Cons = global GRCons,
-  coq.locate "nil" GRNil, Nil = global GRNil,
-  coq.locate "nat" GRNat, Nat = global GRNat,
-  coq.locate "O" GRZero, Zero = global GRZero,
-  coq.locate "list" GRList, List = global GRList,
+  coq.locate "cons" GRCons, Cons = global GRCons _,
+  coq.locate "nil" GRNil, Nil = global GRNil _,
+  coq.locate "nat" GRNat, Nat = global GRNat _,
+  coq.locate "O" GRZero, Zero = global GRZero _,
+  coq.locate "list" GRList, List = global GRList _,
   L  = app [ Cons, _, Zero, app [ Nil, _ ]],
   LE = app [ Cons, Nat, Zero, app [ Nil, Nat ]],
   coq.typecheck L (app [ List, Nat ]) ok.
