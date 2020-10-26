@@ -85,10 +85,6 @@ let under_ctx name ty bo gterm2lp ~depth state x =
   let state = pop_env state in
   state, y
 
-let type_gen =
-  let i = ref 0 in
-  fun () -> incr i; !i
-
 let rec gterm2lp ~depth state x =
   if debug () then
     Feedback.msg_debug Pp.(str"gterm2lp: depth=" ++ int depth ++
@@ -100,7 +96,8 @@ let rec gterm2lp ~depth state x =
       let state, instance, _ = uinstance.API.Conversion.embed ~depth state i in
       state, in_elpi_gr ~depth state gr ~instance
   | GRef(gr,None) ->
-      let state, instance = API.RawQuery.mk_Arg state ~name:(Printf.sprintf "type_%d" (type_gen ())) ~args:[] in
+      let state, uv = F.Elpi.make state in
+      let instance = E.mkUnifVar uv ~args:[] state in
       state, in_elpi_gr ~depth state gr ~instance
   | GVar(id) ->
       let ctx, _ = Option.default (upcast @@ mk_coq_context state, []) (get_ctx state) in
@@ -110,7 +107,8 @@ let rec gterm2lp ~depth state x =
             prlist_with_sep spc Id.print (Id.Map.bindings ctx.name2db |> List.map fst));
       state, E.mkConst (Id.Map.find id ctx.name2db)
   | GSort(UAnonymous {rigid=true}) ->
-      let state, s = API.RawQuery.mk_Arg state ~name:(Printf.sprintf "type_%d" (type_gen ())) ~args:[] in
+      let state, uv = F.Elpi.make state in
+      let s = E.mkUnifVar uv ~args:[] state in
       state, in_elpi_flex_sort s
   | GSort(UNamed [name,0]) ->
       let env = get_global_env state in

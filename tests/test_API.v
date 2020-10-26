@@ -200,7 +200,7 @@ Elpi Query lp:{{
 }}.
 
 Axiom empty_nat : nat.
-Elpi Trace.
+
 Elpi Query lp:{{
   coq.locate "empty_nat" (const GR),
   coq.env.const GR mono none TY.

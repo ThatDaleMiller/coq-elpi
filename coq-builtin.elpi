@@ -520,6 +520,10 @@ external pred coq.env.const-body i:constant, o:univ-instance,
 % uin63 addition)
 external pred coq.env.const-primitive? i:constant.
 
+% [coq.env.global GR T] Builds a fresh universe instance UI for GR and sets
+% T = global GR UI
+external pred coq.env.global i:gref, o:term.
+
 % [coq.locate-module ModName ModPath] locates a module.  It's a fatal error
 % if ModName cannot be located. *E*
 external pred coq.locate-module i:id, o:modpath.
@@ -660,6 +664,18 @@ external pred coq.univ.algebraic-max i:univ, i:univ, o:univ.
 
 % [coq.univ.algebraic-sup U1 U2] constrains U2 = Sup(U1) *E*
 external pred coq.univ.algebraic-sup i:univ, o:univ.
+
+% Universe instance (see also the global term constructor)
+
+% [coq.univ-instance.unify-eq GR UI1 UI2 Diagnostic] Unifies the two
+% universe instances for the same gref.
+external pred coq.univ-instance.unify-eq i:gref, o:univ-instance, 
+                                         o:univ-instance, o:diagnostic.
+
+% [coq.univ-instance.unify-leq GR UI1 UI2 Diagnostic] Unifies the two
+% universe instances for the same gref.
+external pred coq.univ-instance.unify-leq i:gref, o:univ-instance, 
+                                          o:univ-instance, o:diagnostic.
 
 % -- Primitive --------------------------------------------------------
 
@@ -1019,7 +1035,7 @@ external pred coq.gref.set.union i:coq.gref.set, i:coq.gref.set,
 external pred coq.gref.set.inter i:coq.gref.set, i:coq.gref.set, 
                                  o:coq.gref.set.
 
-% [coq.gref.set.diff A B X] X is A  B
+% [coq.gref.set.diff A B X] X is A \ B
 external pred coq.gref.set.diff i:coq.gref.set, i:coq.gref.set, 
                                 o:coq.gref.set.
 

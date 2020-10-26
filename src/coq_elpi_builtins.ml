@@ -223,7 +223,7 @@ let id = { B.string with
 
 let flag name = { (unspec bool) with Conv.ty = Conv.TyName name }
 
-(* Unfortunately the data tye is not symmeteric *)
+(* Unfortunately the data type is not symmeteric *)
 let indt_decl_in = {
   Conv.ty = Conv.TyName "indt-decl";
   pp_doc = (fun fmt () -> Format.fprintf fmt "Declaration of an inductive type");
@@ -606,6 +606,37 @@ let gr2path state gr =
     | Names.GlobRef.IndRef _  | Names.GlobRef.ConstructRef _ ->
           nYI "mutual inductive (make-derived...)"
 
+let coq_univ_instance_unify f gr u1 u2 diag ~depth proof_context _ state =
+  let open Pred in
+  let open Notation in
+  let sigma = get_sigma state in
+  let state, (u1, _) =
+    match u1 with
+    | Pred.Data ui -> state, (ui, EConstr.mkProp)
+    | Pred.NoData -> fresh_uinstance_for state gr in
+  let state, (u2, _) =
+    match u2 with
+    | Pred.Data ui -> state, (ui, EConstr.mkProp)
+    | Pred.NoData -> fresh_uinstance_for state gr in
+  let t1 = EConstr.(mkRef (gr, EInstance.make u1)) in
+  let t2 = EConstr.(mkRef (gr, EInstance.make u2)) in
+  match f proof_context.env sigma t1 t2 with
+  | None -> assert false
+  | Some cst ->
+      try
+        let sigma = Evd.add_universe_constraints sigma cst in
+        let state, assignments = set_current_sigma ~depth state sigma in
+        state, !: u1 +! u2 +! B.mkOK, assignments
+    with
+    | UState.UniversesDiffer -> state, !: u1 +! u2 +! B.(mkERROR "UniversesDiffer"), []
+    | Univ.UniverseInconsistency reason ->
+      match diag with
+      | Data B.OK -> raise No_clause
+      | _ ->
+        let err = Pretype_errors.(CannotUnify (t1,t2,Some (UnifUnivInconsistency reason))) in
+        let msg = Pp.string_of_ppcmds @@ Himsg.explain_pretype_error proof_context.env sigma err in
+          state, !: u1 +! u2 +! B.(mkERROR msg), []
+
 (* See https://github.com/coq/coq/pull/12759 , the system asserts no evars
    and the allow_evars flag is gone! *)
 let hack_prune_all_evars sigma =
@@ -912,6 +943,15 @@ It undestands qualified names, e.g. "Nat.t". It's a fatal error if Name cannot b
         if Environ.is_primitive env c then ()
         else raise No_clause
     | Variable v -> raise No_clause)),
+  DocAbove);
+
+  MLCode(Pred("coq.env.global",
+    In(gref, "GR",
+    Out(closed_ground_term, "T",
+    Full(proof_context,  "Builds a fresh universe instance UI for GR and sets T = global GR UI"))),
+    (fun gr _ ~depth proof_context _ state ->
+       let state, (_, t) = fresh_uinstance_for state gr in
+       state, !: t, [])),
   DocAbove);
 
   MLCode(Pred("coq.locate-module",
@@ -1298,6 +1338,26 @@ denote the same x as before.|};
     Full(unit_ctx,  "constrains U2 = Sup(U1) *E*"))),
   (fun u1 _ ~depth _ _ state ->
     state, !: (mk_algebraic_super u1), [])),
+  DocAbove);
+
+  LPDoc "Universe instance (see also the global term constructor)";
+
+  MLCode(Pred("coq.univ-instance.unify-eq",
+    In(gref, "GR",
+    InOut(B.ioarg uinstance, "UI1",
+    InOut(B.ioarg uinstance, "UI2",
+    InOut(B.ioarg B.diagnostic, "Diagnostic",
+    Full(proof_context,  "Unifies the two universe instances for the same gref."))))),
+    coq_univ_instance_unify EConstr.eq_constr_universes),
+  DocAbove);
+
+  MLCode(Pred("coq.univ-instance.unify-leq",
+    In(gref, "GR",
+    InOut(B.ioarg uinstance, "UI1",
+    InOut(B.ioarg uinstance, "UI2",
+    InOut(B.ioarg B.diagnostic, "Diagnostic",
+    Full(proof_context,  "Unifies the two universe instances for the same gref."))))),
+    coq_univ_instance_unify EConstr.leq_constr_universes),
   DocAbove);
 
   LPDoc "-- Primitive --------------------------------------------------------";

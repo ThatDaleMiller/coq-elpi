@@ -75,8 +75,8 @@ main GR Suffix Clauses :- do! [
   the-suffix Suffix => invert Decl Decl1,
   std.assert-ok! (coq.typecheck-indt-decl Decl1) "derive.invert generates illtyped term",
   coq.env.add-indt Decl1 Inv,
-  coq.env.indt GR _ _ _ _ Ks _,
-  coq.env.indt Inv _ _ _ _ KIs _,
+  coq.env.indt GR _ _ _ _ _ Ks _,
+  coq.env.indt Inv _ _ _ _ _ KIs _,
 
   Clauses = [invert-db (indt GR) (indt Inv) | {std.map2 Ks KIs mk-k-clause}],
   std.forall Clauses (c\coq.elpi.accumulate _ "derive.invert.db" (clause _ _ c))

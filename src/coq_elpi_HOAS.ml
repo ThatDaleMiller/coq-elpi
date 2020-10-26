@@ -590,6 +590,10 @@ let fresh_uinstance_for state gr =
     let _, i = C.destRef t in
     { s with sigma }, (i, EConstr.of_constr t))
 
+let rec mknLam n t =
+  if n = 0 then t
+  else E.mkLam (mknLam (n-1) t)
+
 let in_coq_gref_uinstance ~depth state gr i =
   match E.look ~depth i with
   | E.UnifVar (b,args) ->
@@ -597,7 +601,7 @@ let in_coq_gref_uinstance ~depth state gr i =
       if debug () then
         Feedback.msg_debug
           Pp.(str"lp2term@in_coq_gref_uinstance " ++ Printer.pr_global gr ++ str " := " ++ Univ.Instance.pr Univ.Level.pr i);
-      let gl = [ E.mkApp E.Constants.eqc (E.mkUnifVar b ~args state) [uinstancein i]] in
+      let gl = [ E.mkApp E.Constants.eqc (E.mkUnifVar b ~args:[] state) [mknLam (List.length args) (uinstancein i)]] in
       state, t, gl
   | _ ->
       let state, i, gl = uinstance.API.Conversion.readback ~depth state i in
